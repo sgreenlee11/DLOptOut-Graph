@@ -24,7 +24,7 @@ has been advised of the possibility of such damages.
 $clientidsecstring = Get-Content C:\Scripts\ClientID.txt
 $secureclientid = $clientidsecstring | ConvertTo-SecureString
 $BSTR = `
-    [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword)
+    [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureclientid)
 $clientid = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
 
 #Client Credential Flow with client certificate created in Azure AD Portal
@@ -55,13 +55,13 @@ $smtpserver = "tma-ex13-01"
 
 #Steps to azuire Async token from Azure AD with app-only scope
 $authcontext = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext -ArgumentList $authority, $false
-#Build a client credential using the client ID and client secret key
+#Build a client assertion using the client ID and client certificate
 $clientassertcert = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.ClientAssertionCertificate($clientid, $Cert)
 $authresult = $authcontext.AcquireTokenAsync($resource, $clientassertcert)
 
-####Retrieve and process opt out emails
+####The Magic
 
-#Get All Folder IDs
+#Get All Folder IDs and determine target folder IDs
 $folderurl = "https://graph.microsoft.com/v1.0/users/$($optoutemail)/mailFolders"
 $allfolders = Invoke-RestMethod -Uri $folderurl -Method GET -Headers @{Authorization = $authresult.result.CreateAuthorizationHeader()}
 $inboxfolder = $allfolders.value | Where-Object {$_.displayName -eq "Inbox"}
