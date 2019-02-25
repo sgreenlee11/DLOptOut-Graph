@@ -27,13 +27,11 @@ $BSTR = `
     [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureclientid)
 $clientid = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
 
-#Client Credential Flow with client certificate created in Azure AD Portal
+#Client Credential Flow with Username and Windows Integrated Auth. Requires Native App created in Azure AD Portal
 $adalpath = "C:\Nuget\Microsoft.IdentityModel.Clients.ActiveDirectory.3.13.8\lib\net45\Microsoft.IdentityModel.Clients.ActiveDirectory.dll"
 Add-Type -Path $adalpath
 #Tenant ID can be retrieved from the Azure AD Portal or with Azure AD PS
 $tenantid = "54e3b73f-9b86-4bb5-808e-167a29866205"
-#Get Cert from machine store
-$cert = Get-ChildItem Cert:\LocalMachine\My | ? {$_.Subject -match "OptOutAppCert"}
 #Resource in this example is hitting the unified Graph API. This should work against Outlook API as well
 $resource = "https://graph.microsoft.com"
 #Authority needs to be specific to tenant for client credential flow
@@ -42,6 +40,7 @@ $authority = "https://login.microsoftonline.com/" + $tenantid + "/oauth2/authori
 ####EXO Related Variables 
 
 $optoutemail = "opt-out@M365x851637.onmicrosoft.com"
+$serviceaccount = "labtest10@themessagingadmin.com"
 
 ####Exchange On-Premises Setup
 $psuri = "http://tma-ex16-01.corp.themessagingadmin.com/powershell"
@@ -53,9 +52,9 @@ $smtpserver = "tma-ex13-01"
 
 #Steps to azuire Async token from Azure AD with app-only scope
 $authcontext = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext -ArgumentList $authority, $false
-#Build a client assertion using the client ID and client certificate
-$clientassertcert = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.ClientAssertionCertificate($clientid, $Cert)
-$authresult = $authcontext.AcquireTokenAsync($resource, $clientassertcert)
+#Build a user Credential flow for authentication
+$userCredential = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.UserCredential($serviceaccount)
+$authresult = [Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContextIntegratedAuthExtensions]::AcquireTokenAsync($authcontext, $resource, $clientid, $userCredential)
 
 ####The Magic
 
