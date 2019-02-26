@@ -27,15 +27,20 @@ $BSTR = `
     [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureclientid)
 $clientid = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
 
-#Client Credential Flow with Username and Windows Integrated Auth. Requires Native App created in Azure AD Portal
-$adalpath = "C:\Nuget\Microsoft.IdentityModel.Clients.ActiveDirectory.3.13.8\lib\net45\Microsoft.IdentityModel.Clients.ActiveDirectory.dll"
-Add-Type -Path $adalpath
+#Client Credential Flow with Username and Windows Integrated Auth. Requires Native App created in Azure AD Portal - NOTE: This is not the recommended approach for an unattended app
+$msalpath = "C:\Nuget\Microsoft.Identity.Client.2.7.1\lib\net45\Microsoft.Identity.Client.dll"
+Add-Type -Path $msalpath
 #Tenant ID can be retrieved from the Azure AD Portal or with Azure AD PS
 $tenantid = "54e3b73f-9b86-4bb5-808e-167a29866205"
-#Resource in this example is hitting the unified Graph API. This should work against Outlook API as well
+#Resource in this example is hitting the unified Graph API.
 $resource = "https://graph.microsoft.com"
 #Authority needs to be specific to tenant for client credential flow
-$authority = "https://login.microsoftonline.com/" + $tenantid + "/oauth2/authorize"
+[uri]$authority = "https://login.microsoftonline.com/" + $tenantid + "/oauth2/authorize"
+
+####List of approved groups - Prevent unauthorized use of app
+$allowedgroups = @(
+"TestDL1@themessagingadmin.com",
+"TestDL3@themessagingadmin.com") 
 
 ####EXO Related Variables 
 
@@ -50,11 +55,10 @@ $smtpserver = "tma-ex13-01"
 
 #Retrieve OAuth Token for Graph API
 
-#Steps to azuire Async token from Azure AD with app-only scope
-$authcontext = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext -ArgumentList $authority, $false
-#Build a user Credential flow for authentication
-$userCredential = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.UserCredential($serviceaccount)
-$authresult = [Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContextIntegratedAuthExtensions]::AcquireTokenAsync($authcontext, $resource, $clientid, $userCredential)
+$clientapp = [Microsoft.Identity.Client.PublicClientApplication]::new($clientid,$authority)
+$scopes = New-Object System.Collections.ObjectModel.Collection["string"]
+$scopes.Add("https://graph.microsoft.com/Mail.ReadWrite.Shared")
+$authresult = $clientapp.AcquireTokenByIntegratedWindowsAuthAsync($scopes,$serviceaccount)
 
 ####The Magic
 
@@ -84,7 +88,14 @@ foreach ($m in $messages.value) {
     $fromsmtp = $m.from.emailAddress.address
     $subject = $m.subject
     $group = ($subject -split "- ")[1]
+    #Confirm Group is allowed for Opt out service
+    if($allowedgroups -notcontains $group)
+    {
+        $failed = $true
+        $failedmessage = "Group not available for Opt Out Service"
+    }
     #Attempt to validate DL
+    if($failed -eq $false){
     try {
         $dl = Get-DistributionGroup $group -ErrorAction Stop
     }
@@ -92,6 +103,19 @@ foreach ($m in $messages.value) {
         $failed = $true
         $failedmessage = "Unable to locate Distribution Group"
     }
+    }
+    #Validate that user is a member of DL - Mark as an error/failed if not
+    if ($group.count -eq 1 -and $failed -eq $false)
+    {
+        #Using AD to check member of - Use Get-Recipient or Get-DistributionGroupMember both had drawbacks compared to this approach
+        $userad = Get-ADObject -Filter {Mail -eq $fromsmtp} -Properties MemberOf
+        if($userad.memberof -notcontains $dl.DistinguishedName)
+        {
+            $failed = $true
+            $failedmessage = "User is not a member of this group"
+        }
+    }
+             
     #Attempt to remove member from DL
     if ($group.count -eq 1 -and $failed -eq $false) {
         try {
