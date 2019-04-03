@@ -39,8 +39,8 @@ $resource = "https://graph.microsoft.com"
 
 ####List of approved groups - Prevent unauthorized use of app
 $allowedgroups = @(
-"TestDL1@themessagingadmin.com",
-"TestDL3@themessagingadmin.com") 
+    "TestDL1@themessagingadmin.com",
+    "TestDL3@themessagingadmin.com") 
 
 ####EXO Related Variables 
 
@@ -55,10 +55,10 @@ $smtpserver = "tma-ex13-01"
 
 #Retrieve OAuth Token for Graph API
 
-$clientapp = [Microsoft.Identity.Client.PublicClientApplication]::new($clientid,$authority)
+$clientapp = [Microsoft.Identity.Client.PublicClientApplication]::new($clientid, $authority)
 $scopes = New-Object System.Collections.ObjectModel.Collection["string"]
 $scopes.Add("https://graph.microsoft.com/Mail.ReadWrite.Shared")
-$authresult = $clientapp.AcquireTokenByIntegratedWindowsAuthAsync($scopes,$serviceaccount)
+$authresult = $clientapp.AcquireTokenByIntegratedWindowsAuthAsync($scopes, $serviceaccount)
 
 ####The Magic
 
@@ -87,43 +87,64 @@ foreach ($m in $messages.value) {
     $optoutobj = New-Object PSObject
     $fromsmtp = $m.from.emailAddress.address
     $subject = $m.subject
-    $group = ($subject -split "- ")[1]
+    $group = (($subject -split ":")[1]).trim()
     #Confirm Group is allowed for Opt out service
-    if($allowedgroups -notcontains $group)
-    {
+    if ($allowedgroups -notcontains $group) {
         $failed = $true
         $failedmessage = "Group not available for Opt Out Service"
     }
     #Attempt to validate DL
-    if($failed -eq $false){
-    try {
-        $dl = Get-DistributionGroup $group -ErrorAction Stop
-    }
-    catch {
-        $failed = $true
-        $failedmessage = "Unable to locate Distribution Group"
-    }
-    }
-    #Validate that user is a member of DL - Mark as an error/failed if not
-    if ($group.count -eq 1 -and $failed -eq $false)
-    {
-        #Using AD to check member of - Use Get-Recipient or Get-DistributionGroupMember both had drawbacks compared to this approach
-        $userad = Get-ADObject -Filter {Mail -eq $fromsmtp} -Properties MemberOf
-        if($userad.memberof -notcontains $dl.DistinguishedName)
-        {
-            $failed = $true
-            $failedmessage = "User is not a member of this group"
-        }
-    }
-             
-    #Attempt to remove member from DL
-    if ($group.count -eq 1 -and $failed -eq $false) {
+    if ($failed -eq $false) {
         try {
-            Remove-DistributionGroupMember -Identity $dl.Identity -Member $fromsmtp -Confirm:$false -ErrorAction Stop
+            $dl = Get-DistributionGroup $group -ErrorAction Stop
         }
         catch {
             $failed = $true
-            $failedmessage = "Unable to Remove Member"
+            $failedmessage = "Unable to locate Distribution Group"
+        }
+    }
+    if ($subject -match "Remove") {
+        #Validate that user is a member of DL - Mark as an error/failed if not
+        if ($group.count -eq 1 -and $failed -eq $false) {
+            #Using AD to check member of - Use Get-Recipient or Get-DistributionGroupMember both had drawbacks compared to this approach
+            $userad = Get-ADObject -Filter {Mail -eq $fromsmtp} -Properties MemberOf
+            if ($userad.memberof -notcontains $dl.DistinguishedName) {
+                $failed = $true
+                $failedmessage = "User is not a member of this group"
+            }
+        }
+             
+        #Attempt to remove member from DL
+        if ($group.count -eq 1 -and $failed -eq $false) {
+            try {
+                Remove-DistributionGroupMember -Identity $dl.Identity -Member $fromsmtp -Confirm:$false -ErrorAction Stop
+            }
+            catch {
+                $failed = $true
+                $failedmessage = "Unable to Remove Member"
+            }
+        }
+    }
+    If ($subject -match "ADD") {
+        #Validate that user is not already a member of DL - Mark as an error/failed if it is
+        if ($group.count -eq 1 -and $failed -eq $false) {
+            #Using AD to check member of - Use Get-Recipient or Get-DistributionGroupMember both had drawbacks compared to this approach
+            $userad = Get-ADObject -Filter {Mail -eq $fromsmtp} -Properties MemberOf
+            if ($userad.memberof -contains $dl.DistinguishedName) {
+                $failed = $true
+                $failedmessage = "User is already a member of this group"
+            }
+        }
+                 
+        #Attempt to add member to DL
+        if ($group.count -eq 1 -and $failed -eq $false) {
+            try {
+                Add-DistributionGroupMember -Identity $dl.Identity -Member $fromsmtp -Confirm:$false -ErrorAction Stop
+            }
+            catch {
+                $failed = $true
+                $failedmessage = "Unable to Add Member"
+            }
         }
     }
     #If opt-out failed, move email to Failed folder. Otherwise, move it to processed
@@ -142,6 +163,14 @@ foreach ($m in $messages.value) {
     }
     $optoutobj | Add-Member -MemberType NoteProperty -Name "User" -Value $fromsmtp
     $optoutobj | Add-Member -MemberType NoteProperty -Name "Group" -Value $group
+    if($Subject -match "Add")
+    {
+           $optoutobj | Add-Member -MemberType NoteProperty -Name "Action" -Value "Add"
+    }
+    if($Subject -match "Remove")
+    {
+           $optoutobj | Add-Member -MemberType NoteProperty -Name "Action" -Value "Remove"
+    }
     if ($failed -eq $true) {
         $optoutobj | Add-Member -MemberType NoteProperty -Name "Status" -Value "Failed"
         $optoutobj | Add-Member -MemberType NoteProperty -Name "ErrorMessage" -Value $failedmessage
