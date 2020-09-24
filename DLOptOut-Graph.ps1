@@ -44,9 +44,9 @@ $authority = "https://login.microsoftonline.com/" + $tenantid + "/oauth2/authori
 $optoutemail = "opt-out@M365x851637.onmicrosoft.com"
 
 ####Exchange On-Premises Setup
-$psuri = "http://tma-ex16-01.corp.themessagingadmin.com/powershell"
-$reportfrom = "Optoutreport@themessagingadmin.com"
-$reportto = "segreenl@microsoft.com"
+$psuri = "http://exchange.contoso.com/powershell"
+$reportfrom = "Optoutreport@contoso.com"
+$reportto = "user@contoso.com"
 $smtpserver = "tma-ex13-01"
 
 #Retrieve OAuth Token for Graph API
